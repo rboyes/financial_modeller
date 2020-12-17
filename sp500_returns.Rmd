@@ -1,0 +1,78 @@
+---
+title: "R Notebook"
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+---
+
+Attempting to model the S&P 500 annual returns (including dividends).
+
+Lets read in the file:
+
+```{r}
+library(tidyverse)
+df_sp500 = readxl::read_excel('SP500_annual_returns.xlsx')
+df_sp500 = df_sp500 %>% 
+  rename(return = '% Return', year = 'Year') %>%
+  mutate(year = as.integer(year))
+```
+
+Now lets log transform it as returns are multiplicative, i.e., a return of -50% is not the same as +50% - -50% and +100% are equivalent, which we can model by log transforming.
+
+```{r}
+df_sp500 = df_sp500 %>% mutate(log1p_return = log1p(return/100.0))
+```
+
+And do some plots:
+```{r}
+ggplot(data = df_sp500, aes(log1p_return)) + geom_histogram(bins = 25)
+ggplot(data = df_sp500, aes(sample = log1p_return)) + stat_qq() + stat_qq_line()
+```
+
+Eyeballing it looks very highly skewed.
+
+```{r}
+library(moments)
+skewness(df_sp500 %>% pull(log1p_return))
+```
+Let's calculate the moments, and use the sn package to create samples that return the log1p returns.
+
+```{r}
+sp500_moments = list(
+  mean = mean(df_sp500 %>% pull(log1p_return)),
+  sd = sd(df_sp500 %>% pull(log1p_return)),
+  skew = skewness(df_sp500 %>% pull(log1p_return))
+)
+```
+
+
+```{r}
+library(sn)
+
+sp_params = cp2dp(c(sp500_moments$mean, sp500_moments$sd, sp500_moments$skew), "SN")
+
+df_returns = tibble(log1p_return = rsn(n=1000, dp = sp_params))
+
+df_returns = df_returns %>% mutate(return = expm1(log1p_return))
+
+```
+
+
+And what about assuming a lower return going forward:
+
+```{r}
+lower_params = cp2dp(c(0.05, 0.12, -0.5), "SN")
+
+df_returns = df_returns %>% mutate(log1p_lower_return = rsn(n=1000, dp = lower_params))
+
+df_returns = df_returns %>% mutate(lower_return = expm1(log1p_lower_return))
+
+df_returns
+```
+
+```{r}
+ggplot(data = df_returns, aes(return)) + geom_histogram(bins = 100)
+
+ggplot(data = df_returns, aes(lower_return)) + geom_histogram(bins = 100)
+```
